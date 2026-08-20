@@ -1,0 +1,63 @@
+name: TG Safe APK build
+
+on:
+  push:
+    branches:
+      - tgsafe-core
+    paths:
+      - '.github/workflows/tgsafe-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout with Telegram submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install required Android SDK components
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'platforms;android-35' \
+            'build-tools;35.0.0' \
+            'ndk;27.2.12479018' \
+            'cmake;3.10.2.4988404'
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Validate safety contract
+        run: python3 tools/validate_tgsafe.py
+
+      - name: Build TG Safe debug APK
+        run: ./gradlew :TMessagesProj_App:assembleAfatDebug --no-daemon --stacktrace
+
+      - name: Locate APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          find TMessagesProj_App/build/outputs/apk -type f -name '*.apk' -print
+          APK="$(find TMessagesProj_App/build/outputs/apk -type f -name 'app.apk' | head -n 1)"
+          test -n "$APK"
+          cp "$APK" TG-Safe.apk
+          ls -lh TG-Safe.apk
+
+      - name: Upload TG Safe APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TG-Safe-APK
+          path: TG-Safe.apk
+          if-no-files-found: error
