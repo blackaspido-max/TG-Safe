@@ -1,0 +1,206 @@
+/*
+ * TG Safe source guards.
+ *
+ * Telegram's Android client keeps several safety-sensitive actions in very
+ * large upstream source files. To keep this fork maintainable, this task
+ * applies small, idempotent fail-closed guards before Android preBuild.
+ *
+ * Every patch has a marker. If upstream changes the expected code shape, the
+ * build fails instead of silently producing an unsafe APK.
+ */
+
+import java.util.regex.Pattern
+
+final File tgSafeRoot = rootProject.projectDir
+
+def normalizeLf = { String text -> text.replace("\r\n", "\n").replace("\r", "\n") }
+
+def patchAfterLiteral = { String relativePath, String marker, String needle, String insertion ->
+    File file = new File(tgSafeRoot, relativePath)
+    if (!file.isFile()) {
+        throw new GradleException("TG Safe: missing source file: ${relativePath}")
+    }
+    String text = normalizeLf(file.getText("UTF-8"))
+    if (text.contains(marker)) {
+        return
+    }
+    int index = text.indexOf(needle)
+    if (index < 0) {
+        throw new GradleException("TG Safe: upstream drift while applying ${marker} to ${relativePath}")
+    }
+    int at = index + needle.length()
+    text = text.substring(0, at) + insertion + text.substring(at)
+    file.setText(text, "UTF-8")
+}
+
+def patchAfterRegex = { String relativePath, String marker, String expression, String insertion ->
+    File file = new File(tgSafeRoot, relativePath)
+    if (!file.isFile()) {
+        throw new GradleException("TG Safe: missing source file: ${relativePath}")
+    }
+    String text = normalizeLf(file.getText("UTF-8"))
+    if (text.contains(marker)) {
+        return
+    }
+    def matcher = Pattern.compile(expression, Pattern.MULTILINE).matcher(text)
+    if (!matcher.find()) {
+        throw new GradleException("TG Safe: upstream drift while applying ${marker} to ${relativePath}")
+    }
+    int at = matcher.end()
+    text = text.substring(0, at) + insertion + text.substring(at)
+    file.setText(text, "UTF-8")
+}
+
+def patchImport = { String relativePath, String marker, String anchorImport, String importLine ->
+    patchAfterLiteral(relativePath, marker, anchorImport, "\n${importLine} // ${marker}")
+}
+
+def applyTgSafe = tasks.register("applyTgSafePatches") {
+    group = "tg safe"
+    description = "Apply fail-closed TG Safe guards to Telegram Android sources"
+
+    doLast {
+        final String enterView = "TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java"
+        final String sendHelper = "TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java"
+        final String locationController = "TMessagesProj/src/main/java/org/telegram/messenger/LocationController.java"
+        final String cameraController = "TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraController.java"
+        final String voipService = "TMessagesProj/src/main/java/org/telegram/messenger/voip/VoIPService.java"
+        final String voipPre = "TMessagesProj/src/main/java/org/telegram/messenger/voip/VoIPPreNotificationService.java"
+
+        // ---- Voice messages and round video messages ----------------------
+        patchImport(enterView, "TGSAFE_IMPORT", "import org.telegram.messenger.SharedConfig;", "import org.telegram.messenger.SafeMode;")
+
+        patchAfterLiteral(
+                enterView,
+                "TGSAFE_RECORD_GUARD",
+                "private Runnable recordAudioVideoRunnable = new Runnable() {\n        @Override\n        public void run() {",
+                "\n            if (SafeMode.blockVoiceOrVideoMessage(isInVideoMode())) { // TGSAFE_RECORD_GUARD\n" +
+                "                SafeMode.showBlocked(parentActivity, isInVideoMode() ? \\\"Кружочки отключены в TG Safe\\\" : \\\"Голосовые отключены в TG Safe\\\");\n" +
+                "                return;\n" +
+                "            }"
+        )
+
+        patchAfterLiteral(
+                enterView,
+                "TGSAFE_VIDEO_MESSAGE_GUARD",
+                "private Runnable onFinishInitCameraRunnable = new Runnable() {\n        @Override\n        public void run() {",
+                "\n            if (SafeMode.blockVideoMessageRecording()) { // TGSAFE_VIDEO_MESSAGE_GUARD\n" +
+                "                SafeMode.showBlocked(parentActivity, \\\"Кружочки отключены в TG Safe\\\");\n" +
+                "                return;\n" +
+                "            }"
+        )
+
+        // ---- Location: message creation layer -----------------------------
+        patchAfterRegex(
+                sendHelper,
+                "TGSAFE_SEND_CURRENT_LOCATION_GUARD",
+                "^[ \\t]*public void sendCurrentLocation\\(final MessageObject messageObject, final TLRPC\\.KeyboardButton button\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing()) { // TGSAFE_SEND_CURRENT_LOCATION_GUARD\n" +
+                "            return;\n" +
+                "        }"
+        )
+
+        patchAfterRegex(
+                sendHelper,
+                "TGSAFE_SEND_LOCATION_GUARD",
+                "^[ \\t]*private void sendLocation\\(Location location\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing()) { // TGSAFE_SEND_LOCATION_GUARD\n" +
+                "            return;\n" +
+                "        }"
+        )
+
+        patchAfterRegex(
+                sendHelper,
+                "TGSAFE_LOCATION_MEDIA_GUARD",
+                "^[ \\t]*public void sendMessage\\(SendMessageParams sendMessageParams\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing() && SafeMode.isLocationMedia(sendMessageParams.location)) { // TGSAFE_LOCATION_MEDIA_GUARD\n" +
+                "            return;\n" +
+                "        }"
+        )
+
+        // ---- Location: ongoing/live-location machinery --------------------
+        patchAfterRegex(locationController, "TGSAFE_FUSED_LOCATION_GUARD",
+                "^[ \\t]*public void startFusedLocationRequest\\(boolean permissionsGranted\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing()) { // TGSAFE_FUSED_LOCATION_GUARD\n            return;\n        }")
+
+        patchAfterRegex(locationController, "TGSAFE_BROADCAST_LOCATION_GUARD",
+                "^[ \\t]*private void broadcastLastKnownLocation\\(boolean cancelCurrent\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing()) { // TGSAFE_BROADCAST_LOCATION_GUARD\n            return;\n        }")
+
+        patchAfterRegex(locationController, "TGSAFE_ADD_LIVE_LOCATION_GUARD",
+                "^[ \\t]*protected void addSharingLocation\\(TLRPC\\.Message message\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing()) { // TGSAFE_ADD_LIVE_LOCATION_GUARD\n            return;\n        }")
+
+        patchAfterRegex(locationController, "TGSAFE_LOAD_OWN_LIVE_LOCATION_GUARD",
+                "^[ \\t]*private void loadSharingLocations\\(\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing()) { // TGSAFE_LOAD_OWN_LIVE_LOCATION_GUARD\n            return;\n        }")
+
+        patchAfterRegex(locationController, "TGSAFE_LOCATION_SERVICE_GUARD",
+                "^[ \\t]*private void startService\\(\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing()) { // TGSAFE_LOCATION_SERVICE_GUARD\n            return;\n        }")
+
+        patchAfterRegex(locationController, "TGSAFE_MAP_LOCATION_GUARD",
+                "^[ \\t]*public void setMapLocation\\(Location location, boolean first\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing()) { // TGSAFE_MAP_LOCATION_GUARD\n            return;\n        }")
+
+        patchAfterRegex(locationController, "TGSAFE_LOCATION_ACQUIRE_GUARD",
+                "^[ \\t]*private void start\\(\\) \\{",
+                "\n        if (SafeMode.blockLocationSharing()) { // TGSAFE_LOCATION_ACQUIRE_GUARD\n            return;\n        }")
+
+        // ---- Camera capture ------------------------------------------------
+        patchImport(cameraController, "TGSAFE_CAMERA_IMPORT", "import org.telegram.messenger.SharedConfig;", "import org.telegram.messenger.SafeMode;")
+
+        patchAfterRegex(
+                cameraController,
+                "TGSAFE_PHOTO_CAPTURE_GUARD",
+                "^[ \\t]*public boolean takePicture\\(final File path, final boolean ignoreOrientation, final Object sessionObject, final Utilities\\.Callback<Integer> callback\\) \\{",
+                "\n        if (SafeMode.blockCameraCapture()) { // TGSAFE_PHOTO_CAPTURE_GUARD\n" +
+                "            SafeMode.showBlocked(ApplicationLoader.applicationContext, \\\"Камера отключена в TG Safe\\\");\n" +
+                "            return false;\n" +
+                "        }"
+        )
+
+        patchAfterRegex(
+                cameraController,
+                "TGSAFE_VIDEO_CAPTURE_GUARD",
+                "^[ \\t]*public void recordVideo\\([^\\n]*boolean createThumbnail\\) \\{",
+                "\n        if (SafeMode.blockCameraCapture()) { // TGSAFE_VIDEO_CAPTURE_GUARD\n" +
+                "            SafeMode.showBlocked(ApplicationLoader.applicationContext, \\\"Камера отключена в TG Safe\\\");\n" +
+                "            return;\n" +
+                "        }"
+        )
+
+        // ---- Incoming call answer -----------------------------------------
+        patchImport(voipService, "TGSAFE_VOIP_IMPORT", "import org.telegram.messenger.SharedConfig;", "import org.telegram.messenger.SafeMode;")
+        patchAfterRegex(
+                voipService,
+                "TGSAFE_CALL_ANSWER_GUARD",
+                "^[ \\t]*public void acceptIncomingCall\\(\\) \\{",
+                "\n        if (SafeMode.blockIncomingCallAnswer()) { // TGSAFE_CALL_ANSWER_GUARD\n" +
+                "            SafeMode.showBlocked(ApplicationLoader.applicationContext, \\\"Принятие звонков отключено в TG Safe\\\");\n" +
+                "            return;\n" +
+                "        }"
+        )
+
+        patchImport(voipPre, "TGSAFE_PRECALL_IMPORT", "import org.telegram.messenger.R;", "import org.telegram.messenger.SafeMode;")
+        patchAfterRegex(
+                voipPre,
+                "TGSAFE_PRECALL_ANSWER_GUARD",
+                "^[ \\t]*public static void answer\\(Context context\\) \\{",
+                "\n        if (SafeMode.blockIncomingCallAnswer()) { // TGSAFE_PRECALL_ANSWER_GUARD\n" +
+                "            SafeMode.showBlocked(context, \\\"Принятие звонков отключено в TG Safe\\\");\n" +
+                "            return;\n" +
+                "        }"
+        )
+
+        logger.lifecycle("TG Safe: fail-closed source guards applied/verified")
+    }
+}
+
+gradle.projectsEvaluated {
+    rootProject.subprojects.each { p ->
+        p.tasks.matching { it.name == "preBuild" }.configureEach {
+            dependsOn(rootProject.tasks.named("applyTgSafePatches"))
+        }
+    }
+}
