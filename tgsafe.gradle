@@ -115,7 +115,7 @@ def writeGeneratedApiCredentials = {
         throw new GradleException("TG Safe: could not create generated source directory")
     }
     File generated = new File(packageDir, "SafeApiCredentials.java")
-    generated.setText("""package org.telegram.messenger;\n\npublic final class SafeApiCredentials {\n    public static final int API_ID = ${apiId};\n    public static final String API_HASH = \\\"${apiHash}\\\";\n    private SafeApiCredentials() {}\n}\n""", "UTF-8")
+    generated.setText("""package org.telegram.messenger;\n\npublic final class SafeApiCredentials {\n    public static final int API_ID = ${apiId};\n    public static final String API_HASH = "${apiHash}";\n    private SafeApiCredentials() {}\n}\n""", "UTF-8")
 }
 
 def applyTgSafe = tasks.register("applyTgSafePatches") {
