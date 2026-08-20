@@ -1,6 +1,14 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "=== TG Safe build ===" -ForegroundColor Cyan
+
+if ([string]::IsNullOrWhiteSpace($env:TGSAFE_API_ID) -or [string]::IsNullOrWhiteSpace($env:TGSAFE_API_HASH)) {
+    Write-Warning "TGSAFE_API_ID / TGSAFE_API_HASH are not set. The APK will use Telegram's public source placeholders; login may be rejected."
+    Write-Host "For a private login-capable build, set both environment variables before running this script." -ForegroundColor Yellow
+} else {
+    Write-Host "Custom Telegram API credentials detected for this build." -ForegroundColor Green
+}
+
 Write-Host "1/4  Updating Telegram submodules..."
 git submodule update --init --recursive --depth=1
 
