@@ -45,6 +45,9 @@ def main() -> int:
     cam = "TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraController.java"
     voip = "TMessagesProj/src/main/java/org/telegram/messenger/voip/VoIPService.java"
     pre = "TMessagesProj/src/main/java/org/telegram/messenger/voip/VoIPPreNotificationService.java"
+    login = "TMessagesProj/src/main/java/org/telegram/ui/LoginActivity.java"
+    launch = "TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java"
+    build_vars = "TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java"
 
     # Exact source anchors consumed by tgsafe.gradle.
     require_one(enter, "private Runnable recordAudioVideoRunnable = new Runnable() {\n        @Override\n        public void run() {")
@@ -53,6 +56,8 @@ def main() -> int:
     require_one(send, "public void sendCurrentLocation(final MessageObject messageObject, final TLRPC.KeyboardButton button) {")
     require_one(send, "private void sendLocation(Location location) {")
     require_one(send, "public void sendMessage(SendMessageParams sendMessageParams) {")
+    require_one(send, "private static int prepareSendingDocumentInternal(AccountInstance accountInstance, String path, String originalPath, Uri uri, String mime")
+    require(send, "final long forcedPollGroupId = pollSendParams != null ? pollSendParams.groupId : 0;")
 
     for anchor in (
         "public void startFusedLocationRequest(boolean permissionsGranted) {",
@@ -71,9 +76,43 @@ def main() -> int:
     require_one(voip, "public void acceptIncomingCall() {")
     require_one(pre, "public static void answer(Context context) {")
 
+    # Login anchors: Safe login avoids Firebase/Play Integrity delivery and can
+    # report invalid fork API credentials instead of looking unresponsive.
+    require_one(login, "public LoginActivity() {\n        super();")
+    require_one(login, "public LoginActivity(int account) {\n        super();")
+    require_one(login, "settings.allow_app_hash = settings.allow_firebase = PushListenerController.GooglePushListenerServiceProvider.INSTANCE.hasServices();")
+    require(login, '} else if (error.text.contains("PHONE_NUMBER_INVALID")) {')
+
+    # Persistent Safe mode/account badge anchors.
+    require_one(launch, "setContentView(frameLayout);")
+    require_one(launch, "switchingAccount = true;")
+
+    # API credentials in BuildVars are replaced with a generated class at build
+    # time. The private hash therefore never needs to be committed.
+    require_one(build_vars, "public static int APP_ID = 4;")
+    require_one(build_vars, 'public static String APP_HASH = "014b35b6184100b085b0d0572f9b5103";')
+
     # Central policy and build wiring.
-    require("TMessagesProj/src/main/java/org/telegram/messenger/SafeMode.java", "public static final boolean ENABLED = true;")
-    require("TMessagesProj/src/main/java/org/telegram/messenger/SafeMode.java", "blockLocationSharing()")
+    safe_mode = "TMessagesProj/src/main/java/org/telegram/messenger/SafeMode.java"
+    require(safe_mode, "public static final boolean ENABLED = true;")
+    require(safe_mode, "public static final boolean EXIF_SCRUBBER_ENABLED = true;")
+    require(safe_mode, "DISABLE_FIREBASE_LOGIN_VERIFICATION = true")
+    require(safe_mode, "blockLocationSharing()")
+
+    scrubber = "TMessagesProj/src/main/java/org/telegram/messenger/SafeExifScrubber.java"
+    require(scrubber, "sanitizeImageDocument")
+    require(scrubber, "ExifInterface.TAG_GPS_LATITUDE")
+    require(scrubber, "ExifInterface.TAG_GPS_LONGITUDE")
+    require(scrubber, "return Result.blocked()")
+
+    badge = "TMessagesProj/src/main/java/org/telegram/ui/Components/SafeModeBadge.java"
+    require(badge, "TG SAFE 🛡️")
+    require(badge, "UserObject.getPublicUsername")
+
+    require("tgsafe.gradle", "TGSAFE_EXIF_DOCUMENT_GUARD")
+    require("tgsafe.gradle", "TGSAFE_LOGIN_CODE_DELIVERY_POLICY")
+    require("tgsafe.gradle", "TGSAFE_BADGE_INSTALL")
+    require("tgsafe.gradle", "SafeApiCredentials.java")
     require("build.gradle", "apply from: 'tgsafe.gradle'")
     require("gradle.properties", "APP_PACKAGE=org.telegram.messenger.tgsafe")
     require("TMessagesProj_App/src/main/res/values/tgsafe.xml", "TG Safe 🛡️")
