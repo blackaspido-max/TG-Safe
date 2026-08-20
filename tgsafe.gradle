@@ -8,6 +8,7 @@
  */
 
 final File tgSafeRoot = rootProject.projectDir
+final File tgSafeGeneratedSourceRoot = new File(tgSafeRoot, "TMessagesProj/build/generated/tgsafe")
 
 def normalizeLf = { String text -> text.replace("\r\n", "\n").replace("\r", "\n") }
 
@@ -32,8 +33,89 @@ def patchAfterLiteral = { String relativePath, String marker, String needle, Str
     file.setText(text, "UTF-8")
 }
 
+def patchBeforeLiteral = { String relativePath, String marker, String needle, String insertion ->
+    File file = new File(tgSafeRoot, relativePath)
+    if (!file.isFile()) {
+        throw new GradleException("TG Safe: missing source file: ${relativePath}")
+    }
+
+    String text = normalizeLf(file.getText("UTF-8"))
+    if (text.contains(marker)) {
+        return
+    }
+
+    int index = text.indexOf(needle)
+    if (index < 0) {
+        throw new GradleException("TG Safe: upstream drift while applying ${marker} to ${relativePath}")
+    }
+
+    text = text.substring(0, index) + insertion + text.substring(index)
+    file.setText(text, "UTF-8")
+}
+
+def replaceLiteral = { String relativePath, String marker, String needle, String replacement ->
+    File file = new File(tgSafeRoot, relativePath)
+    if (!file.isFile()) {
+        throw new GradleException("TG Safe: missing source file: ${relativePath}")
+    }
+
+    String text = normalizeLf(file.getText("UTF-8"))
+    if (text.contains(marker)) {
+        return
+    }
+
+    int index = text.indexOf(needle)
+    if (index < 0) {
+        throw new GradleException("TG Safe: upstream drift while applying ${marker} to ${relativePath}")
+    }
+
+    text = text.substring(0, index) + replacement + text.substring(index + needle.length())
+    file.setText(text, "UTF-8")
+}
+
 def patchImport = { String relativePath, String marker, String anchorImport, String importLine ->
     patchAfterLiteral(relativePath, marker, anchorImport, "\n${importLine} // ${marker}")
+}
+
+def writeGeneratedApiCredentials = {
+    String apiId = System.getenv("TGSAFE_API_ID")
+    String apiHash = System.getenv("TGSAFE_API_HASH")
+    if (apiId == null || apiId.trim().isEmpty()) {
+        Object p = rootProject.findProperty("TGSAFE_API_ID")
+        apiId = p == null ? "" : p.toString()
+    }
+    if (apiHash == null || apiHash.trim().isEmpty()) {
+        Object p = rootProject.findProperty("TGSAFE_API_HASH")
+        apiHash = p == null ? "" : p.toString()
+    }
+    apiId = apiId.trim()
+    apiHash = apiHash.trim()
+
+    boolean anyCustom = !apiId.isEmpty() || !apiHash.isEmpty()
+    if (anyCustom && (apiId.isEmpty() || apiHash.isEmpty())) {
+        throw new GradleException("TG Safe: TGSAFE_API_ID and TGSAFE_API_HASH must be provided together")
+    }
+
+    if (!anyCustom) {
+        apiId = "4"
+        apiHash = "014b35b6184100b085b0d0572f9b5103"
+        logger.lifecycle("TG Safe: building with Telegram public placeholder API credentials")
+    } else {
+        if (!(apiId ==~ /[0-9]+/)) {
+            throw new GradleException("TG Safe: TGSAFE_API_ID must contain digits only")
+        }
+        if (!(apiHash ==~ /[0-9a-fA-F]{32}/)) {
+            throw new GradleException("TG Safe: TGSAFE_API_HASH must be a 32-character hexadecimal string")
+        }
+        logger.lifecycle("TG Safe: custom Telegram API credentials supplied for this build")
+    }
+
+    File packageDir = new File(tgSafeGeneratedSourceRoot, "org/telegram/messenger")
+    if (!packageDir.exists() && !packageDir.mkdirs()) {
+        throw new GradleException("TG Safe: could not create generated source directory")
+    }
+    File generated = new File(packageDir, "SafeApiCredentials.java")
+    generated.setText("""package org.telegram.messenger;\n\npublic final class SafeApiCredentials {\n    public static final int API_ID = ${apiId};\n    public static final String API_HASH = \\\"${apiHash}\\\";\n    private SafeApiCredentials() {}\n}\n""", "UTF-8")
 }
 
 def applyTgSafe = tasks.register("applyTgSafePatches") {
@@ -47,6 +129,49 @@ def applyTgSafe = tasks.register("applyTgSafePatches") {
         final String cameraController = "TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraController.java"
         final String voipService = "TMessagesProj/src/main/java/org/telegram/messenger/voip/VoIPService.java"
         final String voipPre = "TMessagesProj/src/main/java/org/telegram/messenger/voip/VoIPPreNotificationService.java"
+        final String loginActivity = "TMessagesProj/src/main/java/org/telegram/ui/LoginActivity.java"
+        final String launchActivity = "TMessagesProj/src/main/java/org/telegram/ui/LaunchActivity.java"
+        final String buildVars = "TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java"
+
+        writeGeneratedApiCredentials()
+        replaceLiteral(buildVars, "TGSAFE_API_ID", "public static int APP_ID = 4;",
+                "public static int APP_ID = SafeApiCredentials.API_ID; // TGSAFE_API_ID")
+        replaceLiteral(buildVars, "TGSAFE_API_HASH", "public static String APP_HASH = \"014b35b6184100b085b0d0572f9b5103\";",
+                "public static String APP_HASH = SafeApiCredentials.API_HASH; // TGSAFE_API_HASH")
+
+        // Login policy for an unofficial privacy fork. Do not depend on the
+        // official Firebase/Play Integrity SMS path or flash-call permissions.
+        patchImport(loginActivity, "TGSAFE_LOGIN_IMPORT", "import org.telegram.messenger.SharedConfig;", "import org.telegram.messenger.SafeMode;")
+        patchAfterLiteral(loginActivity, "TGSAFE_LOGIN_CTOR_POLICY",
+                "public LoginActivity() {\n        super();",
+                '''
+        if (SafeMode.ENABLED) { // TGSAFE_LOGIN_CTOR_POLICY
+            checkPermissions = false;
+            checkShowPermissions = false;
+            forceDisableSafetyNet = true;
+        }''')
+        patchAfterLiteral(loginActivity, "TGSAFE_LOGIN_ACCOUNT_CTOR_POLICY",
+                "public LoginActivity(int account) {\n        super();",
+                '''
+        if (SafeMode.ENABLED) { // TGSAFE_LOGIN_ACCOUNT_CTOR_POLICY
+            checkPermissions = false;
+            checkShowPermissions = false;
+            forceDisableSafetyNet = true;
+        }''')
+        patchAfterLiteral(loginActivity, "TGSAFE_LOGIN_CODE_DELIVERY_POLICY",
+                "settings.allow_app_hash = settings.allow_firebase = PushListenerController.GooglePushListenerServiceProvider.INSTANCE.hasServices();",
+                '''
+            if (SafeMode.disableFirebaseLoginVerification()) { // TGSAFE_LOGIN_CODE_DELIVERY_POLICY
+                settings.allow_flashcall = false;
+                settings.allow_missed_call = false;
+                settings.allow_app_hash = false;
+                settings.allow_firebase = false;
+            }''')
+        patchBeforeLiteral(loginActivity, "TGSAFE_LOGIN_API_ERROR",
+                "} else if (error.text.contains(\"PHONE_NUMBER_INVALID\")) {",
+                '''} else if (SafeMode.ENABLED && (error.text.contains("API_ID_INVALID") || error.text.contains("API_ID_PUBLISHED_FLOOD"))) { // TGSAFE_LOGIN_API_ERROR
+                            needShowAlert("TG Safe", "Для входа в TG Safe нужны собственные Telegram api_id и api_hash. Публичные значения из исходников Telegram не подходят для этого форка.");
+                        ''')
 
         // Voice messages and round-video messages.
         patchImport(enterView, "TGSAFE_IMPORT", "import org.telegram.messenger.SharedConfig;", "import org.telegram.messenger.SafeMode;")
@@ -71,6 +196,27 @@ def applyTgSafe = tasks.register("applyTgSafePatches") {
                 SafeMode.showBlocked(parentActivity, "Кружочки отключены в TG Safe");
                 return;
             }'''
+        )
+
+        // EXIF scrubber: any still image that reaches Telegram's document/file
+        // send path is replaced with a scrubbed cache copy. Failure blocks send.
+        patchAfterLiteral(
+                sendHelper,
+                "TGSAFE_EXIF_DOCUMENT_GUARD",
+                "final long forcedPollGroupId = pollSendParams != null ? pollSendParams.groupId : 0;",
+                '''
+        if (SafeMode.scrubExif()) { // TGSAFE_EXIF_DOCUMENT_GUARD
+            SafeExifScrubber.Result safeExif = SafeExifScrubber.sanitizeImageDocument(path, uri, mime);
+            if (safeExif.candidateImage) {
+                if (!safeExif.success) {
+                    AndroidUtilities.runOnUIThread(() -> SafeMode.showBlocked(ApplicationLoader.applicationContext, "Не удалось безопасно очистить EXIF — отправка изображения заблокирована"));
+                    return ERROR_TYPE_UNSUPPORTED;
+                }
+                path = safeExif.path;
+                originalPath = safeExif.path;
+                uri = safeExif.uri;
+            }
+        }'''
         )
 
         // Location: message creation layer.
@@ -205,11 +351,25 @@ def applyTgSafe = tasks.register("applyTgSafePatches") {
         }'''
         )
 
+        // Persistent UI mode/account marker.
+        patchImport(launchActivity, "TGSAFE_BADGE_IMPORT", "import org.telegram.ui.Components.SearchTagsList;", "import org.telegram.ui.Components.SafeModeBadge;")
+        patchAfterLiteral(launchActivity, "TGSAFE_BADGE_INSTALL", "setContentView(frameLayout);",
+                '''
+        SafeModeBadge.install(frameLayout, this, currentAccount); // TGSAFE_BADGE_INSTALL''')
+        patchAfterLiteral(launchActivity, "TGSAFE_BADGE_ACCOUNT_UPDATE", "switchingAccount = true;",
+                '''
+        SafeModeBadge.update(account); // TGSAFE_BADGE_ACCOUNT_UPDATE''')
+
         logger.lifecycle("TG Safe: fail-closed source guards applied/verified")
     }
 }
 
 gradle.projectsEvaluated {
+    def tgMessagesProject = rootProject.findProject(':TMessagesProj')
+    if (tgMessagesProject != null && tgMessagesProject.extensions.findByName('android') != null) {
+        tgMessagesProject.android.sourceSets.main.java.srcDir(tgSafeGeneratedSourceRoot)
+    }
+
     rootProject.subprojects.each { p ->
         p.tasks.matching { it.name == "preBuild" }.configureEach {
             dependsOn(rootProject.tasks.named("applyTgSafePatches"))
