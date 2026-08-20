@@ -44,7 +44,28 @@ jobs:
         run: python3 tools/validate_tgsafe.py
 
       - name: Build TG Safe debug APK
-        run: ./gradlew :TMessagesProj_App:assembleAfatDebug --no-daemon --stacktrace
+        shell: bash
+        run: |
+          set +e
+          LOG="$RUNNER_TEMP/tgsafe-gradle.log"
+          ./gradlew :TMessagesProj_App:assembleAfatDebug --no-daemon --stacktrace --info --console=plain 2>&1 | tee "$LOG"
+          status=${PIPESTATUS[0]}
+          echo
+          echo '===== TG SAFE: MATCHED ERROR CONTEXT ====='
+          grep -n -B 80 -A 80 -F "Couldn't find config path" "$LOG" || true
+          echo
+          echo '===== TG SAFE: LAST 300 GRADLE LINES ====='
+          tail -n 300 "$LOG" || true
+          exit "$status"
+
+      - name: Upload Gradle build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TG-Safe-Gradle-Log
+          path: ${{ runner.temp }}/tgsafe-gradle.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Locate APK
         shell: bash
