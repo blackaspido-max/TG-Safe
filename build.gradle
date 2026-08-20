@@ -1,3 +1,6 @@
+// TG Safe fail-closed guards are applied before Android preBuild.
+apply from: 'tgsafe.gradle'
+
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 buildscript {
     repositories {
