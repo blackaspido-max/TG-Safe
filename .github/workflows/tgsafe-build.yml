@@ -1,11 +1,9 @@
 name: TG Safe APK build
 
 on:
-  push:
+  pull_request:
     branches:
-      - tgsafe-core
-    paths:
-      - '.github/workflows/tgsafe-build.yml'
+      - master
   workflow_dispatch:
 
 jobs:
