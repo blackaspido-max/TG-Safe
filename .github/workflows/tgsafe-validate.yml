@@ -1,0 +1,43 @@
+name: TG Safe validation
+
+on:
+  push:
+    branches:
+      - tgsafe-core
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  safety-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate TG Safe anchors and hard rails
+        run: python3 tools/validate_tgsafe.py
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Execute TG Safe source guards
+        run: ./gradlew applyTgSafePatches --no-daemon --stacktrace
+
+      - name: Verify guards were actually inserted
+        run: |
+          grep -q 'TGSAFE_RECORD_GUARD' TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java
+          grep -q 'TGSAFE_VIDEO_MESSAGE_GUARD' TMessagesProj/src/main/java/org/telegram/ui/Components/ChatActivityEnterView.java
+          grep -q 'TGSAFE_LOCATION_MEDIA_GUARD' TMessagesProj/src/main/java/org/telegram/messenger/SendMessagesHelper.java
+          grep -q 'TGSAFE_BROADCAST_LOCATION_GUARD' TMessagesProj/src/main/java/org/telegram/messenger/LocationController.java
+          grep -q 'TGSAFE_PHOTO_CAPTURE_GUARD' TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraController.java
+          grep -q 'TGSAFE_VIDEO_CAPTURE_GUARD' TMessagesProj/src/main/java/org/telegram/messenger/camera/CameraController.java
+          grep -q 'TGSAFE_CALL_ANSWER_GUARD' TMessagesProj/src/main/java/org/telegram/messenger/voip/VoIPService.java
+          grep -q 'TGSAFE_PRECALL_ANSWER_GUARD' TMessagesProj/src/main/java/org/telegram/messenger/voip/VoIPPreNotificationService.java

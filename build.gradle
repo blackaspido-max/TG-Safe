@@ -16,3 +16,6 @@ buildscript {
 repositories {
     google()
 }
+
+// TG Safe fail-closed guards are applied before Android preBuild.
+apply from: 'tgsafe.gradle'
