@@ -10,6 +10,9 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      TGSAFE_API_ID: ${{ secrets.TGSAFE_API_ID }}
+      TGSAFE_API_HASH: ${{ secrets.TGSAFE_API_HASH }}
 
     steps:
       - name: Checkout with Telegram submodules
