@@ -3,6 +3,15 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:installLocation="auto">
 
+    <!--
+        TG Safe hard rail for geolocation: even if an upstream UI path is
+        missed, this application is not granted device-location permissions.
+        Received/shared-by-others locations can still be displayed.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove" />
+
     <application android:name="org.telegram.messenger.ApplicationLoaderImpl" tools:replace="name">
         <service
             android:name="org.telegram.messenger.GoogleVoiceClientService"
