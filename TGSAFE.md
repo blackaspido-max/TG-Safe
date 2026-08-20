@@ -1,6 +1,6 @@
 # TG Safe 🛡️
 
-TG Safe is a separate Android Telegram fork intended to coexist with the normal Telegram app. The normal app remains the place for intentional recording/capture; TG Safe is the everyday fail-closed client.
+TG Safe is a separate Android Telegram fork intended to coexist with the normal Telegram app. The normal app remains the place for intentional recording, camera use, calls and location sharing; TG Safe is the everyday fail-closed client.
 
 ## Blocked in TG Safe
 
@@ -21,8 +21,9 @@ TG Safe is a separate Android Telegram fork intended to coexist with the normal 
 - received photos/videos;
 - gallery attachments;
 - files, stickers, GIFs and reactions;
-- viewing locations sent by other people;
-- outgoing calls are not intentionally disabled by the TG Safe policy.
+- viewing locations sent by other people.
+
+TG Safe intentionally has no Android camera or microphone permission. Do not use it for intentional audio/video calls; switch to the normal Telegram installation for those actions.
 
 ## Defence in depth
 
@@ -30,8 +31,9 @@ TG Safe does not rely on hidden buttons alone.
 
 1. `SafeMode.java` is the central fail-closed policy.
 2. Build-time source guards stop voice/video-message recording, camera capture, incoming-call answering and location send/update paths.
-3. The TG Safe application manifest removes Android coarse/fine/background location permissions as a second hard rail.
-4. `tgsafe.gradle` is intentionally strict: if an upstream Telegram update changes a source anchor, the build fails instead of silently skipping a safety guard.
+3. The TG Safe application manifest removes Android camera, microphone and device-location permissions as a second hard rail.
+4. The debug manifest separately strips its location permissions so the higher-priority build-type manifest cannot add them back.
+5. `tgsafe.gradle` is intentionally strict: if an upstream Telegram update changes a source anchor, the build fails instead of silently skipping a safety guard.
 
 ## Separate installation
 
@@ -70,6 +72,9 @@ Before relying on the APK, test all of these on a disposable/private chat/accoun
 - [ ] switch to round video and hold: no round-video recording begins;
 - [ ] Telegram camera cannot capture a photo;
 - [ ] Telegram camera cannot start video recording;
+- [ ] Android settings show no camera permission for TG Safe;
+- [ ] Android settings show no microphone permission for TG Safe;
+- [ ] Android settings show no location permission for TG Safe;
 - [ ] photo/video chosen from gallery can still be sent;
 - [ ] incoming audio call cannot be answered from in-app UI;
 - [ ] incoming audio call cannot be answered from Android notification UI;
