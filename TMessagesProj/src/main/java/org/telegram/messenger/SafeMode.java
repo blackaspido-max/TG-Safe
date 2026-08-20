@@ -15,6 +15,8 @@ import org.telegram.tgnet.TLRPC;
 public final class SafeMode {
 
     public static final boolean ENABLED = true;
+    public static final boolean EXIF_SCRUBBER_ENABLED = true;
+    public static final boolean DISABLE_FIREBASE_LOGIN_VERIFICATION = true;
 
     private SafeMode() {
     }
@@ -41,6 +43,14 @@ public final class SafeMode {
 
     public static boolean blockLocationSharing() {
         return ENABLED;
+    }
+
+    public static boolean scrubExif() {
+        return ENABLED && EXIF_SCRUBBER_ENABLED;
+    }
+
+    public static boolean disableFirebaseLoginVerification() {
+        return ENABLED && DISABLE_FIREBASE_LOGIN_VERIFICATION;
     }
 
     /**
